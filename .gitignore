@@ -1,0 +1,17 @@
+# Test scaffolding: plant.mjs creates this mirror tree of directory junctions at
+# run time. It contains absolute paths to the machine's installed dsh packages,
+# so it must never be committed.
+test/.sandbox/
+
+# Live verification residue: the probe files and their outputs are recreated by
+# the verification checklist in README.zh.md and carry machine-specific content.
+verify/
+
+# Scratch artifacts from inspecting this machine's own dsh installation.
+.session-list.json
+
+# Node/OS noise.
+node_modules/
+*.log
+.DS_Store
+Thumbs.db

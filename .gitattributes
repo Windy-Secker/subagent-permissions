@@ -1,0 +1,5 @@
+# Byte fidelity matters here: `backup/` and `patched/` are vendored copies whose
+# sha256 is compared against freshly generated output, and `patch.mjs` anchors on
+# exact bytes. Git's line-ending conversion would rewrite them on checkout, so it
+# is disabled for every file in this repository.
+* -text

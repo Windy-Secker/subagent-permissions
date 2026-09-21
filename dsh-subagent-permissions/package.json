@@ -1,0 +1,29 @@
+{
+  "name": "dsh-subagent-permissions",
+  "version": "0.1.0",
+  "description": "Per-subagent file permissions for DeepSeek Harness: the delegating agent chooses each child's sandbox mode and writable root, and a delegation may only narrow what the parent already holds.",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "cordis-plugin",
+    "subagent",
+    "sandbox",
+    "permissions",
+    "delegation"
+  ],
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "README.md",
+    "README.zh.md"
+  ],
+  "scripts": {
+    "test": "node test/plant.mjs && node test/seam.test.mjs"
+  },
+  "license": "MIT"
+}
