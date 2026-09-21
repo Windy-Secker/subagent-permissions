@@ -152,15 +152,17 @@ function Set-Mount([bool]$present) {
     if ((-not $present) -and $hasBlock) {
         $backup = "$patchPath.bak-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
         Copy-Item $patchPath $backup
-        $kept = New-Object System.Collections.Generic.List[string]
-        $skipping = $false
-        foreach ($line in ($text -split "`n")) {
-            if ($line -match "^\s*-\s*insert:\s*$") { $skipping = $false }
-            if ($line -match "^\s*-\s*id:\s*$mountId\s*$") { $skipping = $true; continue }
-            if ($skipping -and $line -match "^\s*-\s") { $skipping = $false }
-            if (-not $skipping) { $kept.Add($line) }
+        # Work in whole top-level `- insert:` BLOCKS, not lines: removing only the
+        # entry lines leaves the block's own `- insert:` behind as an empty orphan,
+        # which is a null patch entry. A block is dropped when it names our id.
+        $keptInsertBlocks = New-Object System.Collections.Generic.List[string]
+        foreach ($block in ($text -split "(?m)^(?=- insert:)") | Where-Object { $_.Trim().Length -gt 0 }) {
+            if ($block -match "^\s*-\s*id:\s*$mountId\s*$" -or $block.Contains("id: $mountId")) {
+                continue
+            }
+            $keptInsertBlocks.Add($block.TrimEnd())
         }
-        Write-Text $patchPath (($kept -join "`n").TrimEnd() + "`n")
+        Write-Text $patchPath (($keptInsertBlocks -join "`n`n").TrimEnd() + "`n")
         Write-Output "unmounted $mountId from $patchPath (backup $backup)"
         return
     }
