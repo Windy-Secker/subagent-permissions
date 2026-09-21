@@ -261,23 +261,47 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install-subagent-permissio
 
 ## 7. 装机后的验收清单（建议照做一遍）
 
-1. **只读子代理确实写不了**
-   派一个 `sandbox_mode: "read-only"` 的子代理，让它往工作区写文件。期望：子代理收到
-   `[sandbox: file access denied under read-only mode]`，文件不存在。
+1. **只读子代理确实写不了，但读得到**
+   派一个 `sandbox_mode: "read-only"` 的子代理，让它**读**一个探针文件、再**写**它。
+   期望：读到 marker；写入被拒并收到 `[sandbox: file access denied under read-only mode]`；
+   写入前后探针文件的 sha256 **不变**。
 2. **独立工作区确实生效**
-   派一个 `writable_root` 指向 `<工作区>\subagents\probe-1` 的子代理，让它写一个文件。
-   期望：文件出现在那个目录里；会话日志里子会话的 header 的 `cwd` 就是该目录。
+   派一个 `writable_root` 指向某目录的子代理，让它写一个相对路径文件，并再试写一个**范围外**文件。
+   期望：子代理的会话工作区（策略行/ shell cwd）就是该目录；文件落在那里面；
+   范围外写入被拒；会话日志里子会话的 header `cwd` 就是该目录。
 3. **越权被拒**
    主代理当前是 `workspace-write` 时请求 `sandbox_mode: "danger-full-access"`。
-   期望：工具调用直接失败，报 `would WIDEN the child`。
+   期望：**在子代理被创建之前**工具调用就失败，报 `would WIDEN the child`。
 4. **范围外的可写根被拒**
-   请求 `writable_root` 指向工作区之外（例如 `C:\Windows` 或用户主目录）。
-   期望：报 `is outside every root this session may write under`。
+   请求 `writable_root` 指向工作区之外（例如用户主目录）。
+   期望：同样在创建之前失败，报 `is outside every root this session may write under`。
 5. **审计留痕**
-   `Get-Content ~\.dsh\subagent-permissions.audit.jsonl` 应能看到上面两类记录。
+   `Get-Content ~\.dsh\subagent-permissions.audit.jsonl` 应能看到**两类**记录：
+   一条是插件记的"模型请求了什么"（含 `requested`），一条是补丁记的"实际给了什么"（含 `applied: true`）。
 
 会话日志验证方式与既有习惯一致：`subagent-permissions` 的插件日志、以及子会话日志里的
-`subagent/descriptor` / `sandbox/mode` 事件。
+`subagent/descriptor` / `sandbox/mode` 事件。读会话日志要注意它是**多帧 zstd**，
+必须流式解码（用 `node inspect-session.mjs <会话目录>`，一次 `zstdDecompressSync` 只能读到头部）。
+
+### 7.1 本机实测结果（2026-09-22，全部通过）
+
+| 项 | 结果 |
+|---|---|
+| 只读子代理读探针 | `READ_OK: marker: ORIGINAL-CONTENT-9F3A2C` |
+| 只读子代理写探针（文件工具） | `[sandbox: file access denied under read-only mode]` |
+| 只读子代理写探针（shell） | 被拒（ACL：`对路径…的访问被拒绝`） |
+| 探针 sha256 | 三次验证后仍为 `C1FC6F4F…F441B`（未变） |
+| 子代理自述策略 | `Current DSH file policy: read-only.` |
+| 子代理自述委派范围 | `…fixed by the delegating agent: sandbox mode "read-only"; your session workspace is the inheriting workspace.` |
+| 独立工作区 | 子代理 WORKSPACE 与 SHELL_CWD 均为指定 `writable_root`；`inside.txt` 落在其中 |
+| 范围外写入 | `[sandbox: file access denied under workspace-write mode]`，文件未创建 |
+| 越权请求 | 创建前失败：`would WIDEN the child beyond this session's "workspace-write" mode` |
+| 范围外可写根 | 创建前失败：`is outside every root this session may write under` |
+| 审计 | 每个带参数的派活产生 2 条记录（`requested` + `applied: true`） |
+| 会话日志 | 子会话独立目录 `--E-dsh-workspace-dsh-…-verify-ws-probe--`，header `cwd` = 指定可写根 |
+
+> 读是**不受限**的：沙箱只围写（这正是"只读侦察"可用的原因）。验收时若子代理声称"读也被拒"，
+> 先让它**只做一步读**再判断——本机出现过一次由模型自身指令遵循导致的假报，单独复测即通过。
 
 ---
 
