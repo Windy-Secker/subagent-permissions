@@ -205,12 +205,28 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install-subagent-permissio
 
 ### 5.4 还原
 
-```powershell
-# 把两个成品包恢复成原始文件（插件仍挂着，但会自检失败并只记一条警告）
-powershell -NoProfile -ExecutionPolicy Bypass -File .\install-subagent-permissions.ps1 -Restore
+**dsh 起不来时，跑这一条**（按正确顺序完成还原，两步都幂等，缺挂载/缺插件/缺备份只会报告不会失败）：
 
+```powershell
+# 先看会做什么（不改任何文件）
+powershell -NoProfile -ExecutionPolicy Bypass -File .\revert-subagent-permissions.ps1 -DryRun
+
+# 真正还原：先卸载插件与挂载行，再从 backup\ 还原全部 5 个文件
+powershell -NoProfile -ExecutionPolicy Bypass -File .\revert-subagent-permissions.ps1
+
+# 重启 dsh 后确认
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-subagent-permissions.ps1 -Verify
+# 期望：0/5 patched、plugin MISSING、mount MISSING
+```
+
+也可以只用细粒度开关（`revert-subagent-permissions.ps1` 就是按这个顺序调它们）：
+
+```powershell
 # 只卸载插件（挂载行 + 插件目录），保留代码补丁
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install-subagent-permissions.ps1 -Remove
+
+# 只把 5 个成品包文件恢复成原始文件（插件仍挂着，但会自检失败并只记一条警告）
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-subagent-permissions.ps1 -Restore
 ```
 
 还原后同样需要重启 dsh。
@@ -274,6 +290,7 @@ subagent-permissions\
 ├─ package.json                        工程元数据 + npm scripts（check/generate/test/selfcheck）
 ├─ selfcheck.mjs                       一键离线自检（锚点 + 语法 + 真模块行为 + 审计链 + 插件形态 + key 一致性）
 ├─ install-subagent-permissions.ps1    安装 / 校验 / 还原（默认干跑，-Apply 才动手）
+├─ revert-subagent-permissions.ps1     ★ 出问题时跑这一条：按正确顺序一键还原（-DryRun 可预演）
 ├─ patch.mjs                           补丁生成器（单点字面量替换，锚点失配即报错）
 ├─ dsh-subagent-permissions\           插件包（挂进 profile 的那一半）
 │  ├─ package.json
@@ -292,9 +309,11 @@ subagent-permissions\
 │  └─ dsh-subagent-in-process-driver-0.1.5-rc.2\lib\index.js
 ├─ test\
 │  ├─ plant.mjs                        搭镜像树：让补丁后的包以"真模块"身份被 import
+│  ├─ schema.test.mjs                  6 项 schema 测试（喂给 dsh 真实的 defineTool 校验器 + 2 条反向断言）
 │  ├─ seam.test.mjs                    28 项权限行为测试（真实模块、真实 AsyncLocalStorage）
 │  └─ audit.test.mjs                   7 项审计链测试（插件写入器 / 补丁→sink / tools/execute 钩子）
 ├─ probe-anchor.mjs                    锚点失配时打印真实字节，便于重取锚点
+├─ probe-schema.mjs                    把每一种工具组合的 schema 跑一遍真实校验器（改 schema 后先跑它）
 ├─ probe-remotes.mjs                   推送前探测两个远程仓库是否可达
 ├─ inspect-session.mjs                 解压多帧 zstd 会话日志，抽取 cwd / sandbox-mode / 委派说明
 ├─ parse-check.ps1 / inspect-line.ps1  PowerShell 语法与逐字符排查（装机器排错用）
@@ -357,6 +376,24 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install-subagent-permissio
 - **只有 in-process 子代理后端受此机制约束**（`spawn` / `fork`）。进程外后端（ACP / SDK / Codex / Claude Code）走的是另一套 `cwd` 配置，本方案未触及。
 - **`tools/execute` 钩子只做拦截与审计**，不修改参数；真正的校验在 `dsh-tool-subagent` 的补丁里（因为那里才拿得到 `ctx.sandboxPolicy`）。
 - 若上游将来把"逐子代理权限"做成原生能力，应当**撤掉补丁**，只保留插件里可复用的审计与 `writableRootBase` 策略。
+
+### ★ 改 schema 时必读：`additionalProperties` 是启动级约束
+
+dsh 的 author-time schema 校验器规定：**每个 `type: "object"` 节点都必须显式声明 `additionalProperties`（布尔值），嵌套对象同样适用。**
+违反的后果不是"工具不好用"，而是**整个 `standard` preset 挂载失败、dsh 无法恢复会话**：
+
+```
+failed to apply loader entry tool-subagent-fork (@deepseek-ai/dsh-tool-subagent):
+unsupported JSON schema: parameters.delegate_permissions.additionalProperties
+must be explicitly true or false (…\dsh-agent-presets\presets\standard\agent.cordis.yml)
+```
+
+本项目为此有两道闸：
+
+- `test\schema.test.mjs`：把 `delegate_permissions` 的字段交给**真实的 `defineTool`**（dsh 自己的校验器）编译，
+  并含两条**反向断言**（故意删掉 `additionalProperties`，断言必须被拒），确保这条约束"真的在被校验"。
+- `probe-schema.mjs`：把**每一种工具组合**（后台/前台、one-shot/continuable、含/不含模型选择、插件挂载/未挂载）
+  的完整参数与输出 schema 都跑一遍真实校验器。**改完 schema 先跑它**，再谈重启。
 
 ---
 

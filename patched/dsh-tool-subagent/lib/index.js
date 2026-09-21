@@ -579,7 +579,11 @@ function apply(ctx, config, session) {
 									type: "string",
 									description: "Absolute path that becomes the child session's workspace and the boundary of its workspace-write mode. Created when missing. Must be inside a root this session may write under; omit to inherit your workspace. Relative paths are rejected."
 								}
-							}
+							},
+							// dsh's author-time schema validator REQUIRES every object node to
+							// declare this explicitly; without it the whole preset fails to
+							// mount and dsh cannot resume a session at all.
+							additionalProperties: false
 						} } : {}
 					},
 					output: {

@@ -84,6 +84,7 @@ check(
 	'found the dynamic gate',
 );
 run('plant the patched packages as real modules', 'node', [join(here, 'test', 'plant.mjs')]);
+run('dsh author-time schema validation', 'node', [join(here, 'test', 'schema.test.mjs')]);
 run('seam behaviour tests', 'node', [join(here, 'test', 'seam.test.mjs')]);
 run('audit chain tests', 'node', [join(here, 'test', 'audit.test.mjs')]);
 
