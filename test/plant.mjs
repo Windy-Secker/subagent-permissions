@@ -26,11 +26,18 @@ const PATCHED = new Set(['dsh-subagent', 'dsh-tool-subagent']);
 
 function findInstalledScope() {
 	if (process.env.DSH_NODE_MODULES) return process.env.DSH_NODE_MODULES;
+	// Stable anchor for the relocated layout: `$DSH_HOME/profiles/node_modules/
+	// @deepseek-ai/dsh` is a junction to the current CLI checkout, so this holds
+	// even though the CLI's own install directory has already moved once.
+	if (process.env.DSH_HOME) {
+		const farmCli = join(process.env.DSH_HOME, 'profiles', 'node_modules', '@deepseek-ai', 'dsh');
+		if (existsSync(join(farmCli, 'package.json'))) return farmCli;
+	}
 	try {
 		const require = createRequire(import.meta.url);
 		return dirname(require.resolve('@deepseek-ai/dsh/package.json'));
 	} catch {}
-	// The workspace does not depend on dsh itself; the CLI is a global install.
+	// The workspace does not depend on dsh itself; older layouts had a global install.
 	for (const prefix of [process.env.APPDATA ? join(process.env.APPDATA, 'npm', 'node_modules') : undefined, process.env.USERPROFILE ? join(process.env.USERPROFILE, 'AppData', 'Roaming', 'npm', 'node_modules') : undefined]) {
 		if (prefix === undefined) continue;
 		const candidate = join(prefix, '@deepseek-ai', 'dsh');

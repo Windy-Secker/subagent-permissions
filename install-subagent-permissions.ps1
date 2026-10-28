@@ -28,7 +28,7 @@ param(
     [switch]$Restore,
     [switch]$Remove,
     [string]$Profile = 'web',
-    [string]$DshHome = (Join-Path $env:USERPROFILE '.dsh')
+    [string]$DshHome = $(if ($env:DSH_HOME) { $env:DSH_HOME } else { Join-Path $env:USERPROFILE '.dsh' })
 )
 
 $ErrorActionPreference = 'Stop'
@@ -74,6 +74,9 @@ function Get-CandidateSites {
     if ($env:USERPROFILE) { $roots += (Join-Path $env:USERPROFILE 'AppData\Roaming\npm\node_modules\@deepseek-ai\dsh') }
     $roots += (Join-Path $profileDir '.dsh-module-fallback')
     $roots += $profileDir
+    # Relocated layout: one shared module farm sits above the profiles and holds
+    # the @deepseek-ai junctions into the CLI package.
+    $roots += (Join-Path $DshHome 'profiles')
     foreach ($root in $roots) {
         $candidate = Join-Path $root 'node_modules\@deepseek-ai'
         # A site qualifies only when every package this patch targets is present:

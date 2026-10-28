@@ -47,12 +47,18 @@ const SUPPORTED_VERSIONS = new Set(['0.1.5-rc.2']);
 function candidateRoots() {
 	const roots = [];
 	if (process.env.DSH_NODE_MODULES) roots.push(process.env.DSH_NODE_MODULES);
+	// Relocated layout (2026-10): the CLI is a checkout at E:\dsh\app\dsh and every
+	// profile resolves packages through the farm at $DSH_HOME/profiles/node_modules,
+	// whose @deepseek-ai entries are junctions into that checkout's node_modules.
+	// This is the stable anchor — the install directory is a deployment detail and
+	// has already moved once, whereas DSH_HOME is what every launch uses.
+	if (process.env.DSH_HOME) roots.push(join(process.env.DSH_HOME, 'profiles', 'node_modules', '@deepseek-ai', 'dsh'));
 	try {
 		roots.push(dirname(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json')));
 	} catch {}
 	if (process.env.APPDATA) roots.push(join(process.env.APPDATA, 'npm', 'node_modules', '@deepseek-ai', 'dsh'));
 	if (process.env.USERPROFILE) roots.push(join(process.env.USERPROFILE, 'AppData', 'Roaming', 'npm', 'node_modules', '@deepseek-ai', 'dsh'));
-	return roots.filter((root) => root.length > 0 && existsSync(root));
+	return [...new Set(roots.filter((root) => root.length > 0 && existsSync(root)))];
 }
 
 function findPackage(name) {
@@ -585,15 +591,29 @@ export { PATCHES, findPackage, applyEdits, TOOL_SUBAGENT_EDITS, SUBAGENT_EDITS }
 function applyEdits(source, file) {
 	let text = source;
 	const applied = [];
+	const alreadyApplied = [];
 	for (const item of file.edits) {
-		const occurrences = text.split(item.before).length - 1;
-		if (occurrences !== 1) {
-			throw new Error(`${file.pkgName}/${file.relPath}: anchor "${item.id}" matched ${occurrences} times (need exactly 1). The installed package differs from the version this patch was written against; re-derive that anchor before patching.`);
+		// "Already applied" is decided PER EDIT, not by one marker occurring
+		// somewhere in the file. That heuristic misclassified the types-layer
+		// files: they are patched but never contain the carrier marker, so a
+		// patched tree reported "anchor matched 0 times ... re-derive that anchor"
+		// — a message that sends the reader hunting for a version change that did
+		// not happen. This became visible only after a move carried an already
+		// patched CLI tree to a new path.
+		const beforeCount = text.split(item.before).length - 1;
+		if (beforeCount === 1) {
+			text = text.replace(item.before, item.after);
+			applied.push(item.id);
+			continue;
 		}
-		text = text.replace(item.before, item.after);
-		applied.push(item.id);
+		const afterCount = text.split(item.after).length - 1;
+		if (beforeCount === 0 && afterCount >= 1) {
+			alreadyApplied.push(item.id);
+			continue;
+		}
+		throw new Error(`${file.pkgName}/${file.relPath}: anchor "${item.id}" matched ${beforeCount} times (need exactly 1). Either the replacement text is absent too (the installed package differs from the version this patch was written against — re-derive that anchor), or the anchor appears more than once (a duplicate edit would corrupt the file).`);
 	}
-	return { text, applied };
+	return { text, applied, alreadyApplied };
 }
 
 function sha256(text) {
@@ -684,11 +704,22 @@ function run(argv) {
 			throw error;
 		}
 
+		// Nothing left to change: the tree already carries every replacement. This is
+		// a success state, not a mismatch — `--check` must say so, and an apply run
+		// must leave the file alone instead of failing.
+		if (result.applied.length === 0) {
+			report.push(`OK    ${file.pkgName}@${pkg.version}: already patched (${result.alreadyApplied.length}/${file.edits.length} edits present)`);
+			continue;
+		}
+		const mixed = result.alreadyApplied.length > 0
+			? `, ${result.alreadyApplied.length} already applied`
+			: '';
+
 		if (!SUPPORTED_VERSIONS.has(pkg.version)) {
 			report.push(`WARN  ${file.pkgName} version ${pkg.version} is not one this patch was validated against; the anchors did still match.`);
 		}
 		if (checkOnly) {
-			report.push(`OK    ${file.pkgName}@${pkg.version}: all ${result.applied.length} anchors match`);
+			report.push(`OK    ${file.pkgName}@${pkg.version}: ${result.applied.length} anchors match${mixed}`);
 			continue;
 		}
 		if (!existsSync(backupPath)) {

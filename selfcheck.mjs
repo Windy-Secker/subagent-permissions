@@ -20,6 +20,13 @@ const results = [];
 /** The installed dsh dependency scope, so a check can compare what would run. */
 function installedScope() {
 	if (process.env.DSH_NODE_MODULES) return process.env.DSH_NODE_MODULES;
+	// Stable anchor for the relocated layout: the farm under DSH_HOME holds every
+	// package as a junction into the current CLI checkout, so this keeps working
+	// even though the CLI's own install directory has already moved once.
+	if (process.env.DSH_HOME) {
+		const farm = join(process.env.DSH_HOME, 'profiles', 'node_modules', '@deepseek-ai');
+		if (existsSync(farm)) return farm;
+	}
 	try {
 		const cli = dirname(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'));
 		if (existsSync(join(cli, 'node_modules', '@deepseek-ai'))) return join(cli, 'node_modules', '@deepseek-ai');
